@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>幸運號碼</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 背景裝飾 -->
+        <div class="bg-glow bg-glow-1"></div>
+        <div class="bg-glow bg-glow-2"></div>
+
+        <header>
+            <div class="icon-clover">🍀</div>
+            <h1>幸運號碼</h1>
+            <p>LUCKY 6 GENERATOR</p>
+        </header>
+
+        <main>
+            <div class="balls-container" id="ballsContainer">
+                <!-- 號碼球會由 JS 動態生成 -->
+                <div class="ball placeholder">?</div>
+                <div class="ball placeholder">?</div>
+                <div class="ball placeholder">?</div>
+                <div class="ball placeholder">?</div>
+                <div class="ball placeholder">?</div>
+                <div class="ball placeholder">?</div>
+            </div>
+            
+            <div class="history-panel">
+                <span class="history-label">上期幸運號</span>
+                <span class="history-numbers" id="historyNumbers">-- -- -- -- -- --</span>
+            </div>
+        </main>
+
+        <footer>
+            <button id="generateBtn" class="glow-button">
+                <span class="btn-text">自動選號</span>
+                <span class="btn-subtext">START</span>
+            </button>
+        </footer>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
