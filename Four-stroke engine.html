@@ -1,0 +1,564 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>四行程引擎模擬器</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: 全版 3D 舞台，資訊面板與控制列以半透明面板浮在畫面上方與下方。
+   刻意採單一深色外觀（工程製圖桌面），顏色全部由 token 控制。 */
+:root {
+  color-scheme: dark;
+  --bg: #0a1017;
+  --panel: rgba(14, 22, 31, 0.80);
+  --line: #25364a;
+  --fg: #e3ecf4;
+  --dim: #8396a9;
+  --btn: #16222f;
+  --btn-h: #213449;
+  --focus: #7cc4ff;
+  --c-intake: #4aa3ff;
+  --c-comp: #f2c14e;
+  --c-power: #ff6a3d;
+  --c-exh: #9aa7b4;
+  --f-display: "Barlow Condensed", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --f-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+#app { position: relative; height: 100%; min-height: 620px; overflow: hidden; }
+#stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#stage:active { cursor: grabbing; }
+#app::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 42%, transparent 45%, rgba(4, 8, 12, 0.55) 100%); }
+
+.hud { position: absolute; z-index: 2; pointer-events: none; }
+.hud > * { pointer-events: auto; }
+.hud-top {
+  top: 0; left: 0; right: 0;
+  padding-block: 16px 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+}
+.hud-bottom {
+  bottom: 0; left: 0; right: 0;
+  padding-block: 0 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: center;
+}
+.title { pointer-events: none !important; min-width: 0; }
+.title h1 { margin: 0; font-family: var(--f-display); font-weight: 600; font-size: 30px; letter-spacing: 0.04em; line-height: 1.1; }
+.title p { margin: 4px 0 0; color: var(--dim); font-size: 12px; letter-spacing: 0.04em; }
+.title .hint { margin-top: 10px; font-family: var(--f-mono); font-size: 11px; color: var(--dim); opacity: 0.85; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+.status { width: 340px; max-width: 100%; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.chip {
+  --c: var(--dim);
+  font: 600 13px/1 var(--f-display); letter-spacing: 0.06em;
+  background: var(--btn); color: var(--dim); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px 4px 7px; cursor: pointer; text-align: center;
+  box-shadow: inset 0 -3px 0 transparent;
+}
+.chip small { display: block; font: 400 10px/1.2 var(--f-mono); margin-top: 3px; letter-spacing: 0; opacity: 0.8; }
+.chip:hover { background: var(--btn-h); }
+.chip.on { color: var(--fg); border-color: var(--c); box-shadow: inset 0 -3px 0 var(--c); }
+.desc { margin: 0; font-size: 13px; color: var(--fg); min-height: 3em; }
+.desc b { font-family: var(--f-display); font-size: 17px; letter-spacing: 0.05em; margin-right: 6px; }
+.readouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.readouts div { min-width: 0; }
+.readouts dt { font-size: 11px; color: var(--dim); letter-spacing: 0.06em; }
+.readouts dd { margin: 0; font-family: var(--f-mono); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.dock { width: min(980px, 100%); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.timeline { position: relative; height: 54px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #0c141c; }
+.tl-seg { position: absolute; top: 0; bottom: 0; width: 25%; border-right: 1px solid var(--line); font: 600 11px/1 var(--f-display); letter-spacing: 0.08em; padding: 5px 6px; color: var(--dim); }
+.tl-seg:nth-child(1) { left: 0; background: rgba(74, 163, 255, 0.10); }
+.tl-seg:nth-child(2) { left: 25%; background: rgba(242, 193, 78, 0.10); }
+.tl-seg:nth-child(3) { left: 50%; background: rgba(255, 106, 61, 0.12); }
+.tl-seg:nth-child(4) { left: 75%; background: rgba(154, 167, 180, 0.10); border-right: 0; }
+.tl-seg span { font-family: var(--f-mono); font-weight: 400; margin-left: 4px; opacity: 0.7; }
+.timeline svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--fg); box-shadow: 0 0 8px rgba(227, 236, 244, 0.6); left: 0; pointer-events: none; }
+.tl-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--dim); }
+.tl-legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; }
+.group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+button {
+  font: 500 13px/1 var(--f-body); color: var(--fg); background: var(--btn);
+  border: 1px solid var(--line); border-radius: 4px; padding: 9px 13px; cursor: pointer; min-height: 36px;
+}
+button:hover { background: var(--btn-h); }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button.primary { background: var(--fg); color: #0a1017; border-color: var(--fg); font-weight: 700; min-width: 76px; }
+button.primary:hover { background: #fff; }
+button[aria-pressed="true"], button.active { background: #1c3a57; border-color: #3c78ad; }
+output { font-family: var(--f-mono); font-size: 13px; min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; }
+
+.tag { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; font: 500 11px/1 var(--f-mono); color: var(--fg); white-space: nowrap; will-change: transform; }
+.tag::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); margin-right: 5px; vertical-align: 1px; box-shadow: 0 0 0 3px rgba(227, 236, 244, 0.18); }
+.tag span { background: rgba(10, 16, 23, 0.7); padding: 2px 5px; border-radius: 3px; }
+#err { position: absolute; z-index: 3; left: max(16px, env(safe-area-inset-left, 0px)); top: 96px; max-width: min(340px, calc(100% - 32px)); padding: 8px 10px; border: 1px solid #7a5a2a; border-radius: 4px; background: rgba(40, 28, 10, 0.85); color: #f2d9a6; font-size: 12px; pointer-events: none; }
+
+@media (max-width: 720px) {
+  .title h1 { font-size: 24px; }
+  .title .hint, .title p { display: none; }
+  .status { width: 100%; padding: 10px; gap: 8px; }
+  .desc { font-size: 12px; min-height: 0; }
+  .readouts { display: none; }
+  .tl-legend { display: none; }
+  .timeline { height: 40px; }
+  button { padding: 8px 10px; }
+  .tag { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .cursor { box-shadow: none; } }
+</style>
+
+<div id="app">
+  <canvas id="stage" aria-label="可旋轉、縮放的單缸四行程引擎 3D 模型"></canvas>
+  <div id="err" hidden>無法載入 3D 引擎（Three.js）。請確認網路連線後重新整理。</div>
+
+  <div class="hud hud-top">
+    <div class="title">
+      <h1>四行程引擎</h1>
+      <p>單缸 · 雙頂置凸輪軸 · 進排氣門各一</p>
+      <p class="hint">拖曳旋轉　滾輪／雙指縮放　右鍵／雙指平移</p>
+    </div>
+    <div class="panel status">
+      <div class="chips" id="chips"></div>
+      <p class="desc" id="desc"></p>
+      <dl class="readouts">
+        <div><dt>曲軸角度</dt><dd id="rCrank">0°</dd></div>
+        <div><dt>循環進度</dt><dd id="rCycle">0° / 720°</dd></div>
+        <div><dt>活塞</dt><dd id="rPiston">下行 0%</dd></div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="hud hud-bottom">
+    <div class="panel dock">
+      <div class="timeline" id="timeline">
+        <div class="tl-seg">進氣<span>0–180°</span></div>
+        <div class="tl-seg">壓縮<span>180–360°</span></div>
+        <div class="tl-seg">動力<span>360–540°</span></div>
+        <div class="tl-seg">排氣<span>540–720°</span></div>
+        <svg id="lift" viewBox="0 0 720 54" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="cursor" id="cursor"></div>
+      </div>
+      <div class="tl-legend">
+        <span><i style="background:var(--c-intake)"></i>進氣門升程</span>
+        <span><i style="background:var(--c-power)"></i>排氣門升程</span>
+        <span><i style="background:var(--c-comp)"></i>點火（上死點前 8°）</span>
+      </div>
+      <div class="bar">
+        <div class="group" role="group" aria-label="播放控制">
+          <button id="bPlay" class="primary" type="button">暫停</button>
+          <button id="bSlow" type="button">減速</button>
+          <output id="rpm" aria-live="polite">60 RPM</output>
+          <button id="bFast" type="button">加速</button>
+        </div>
+        <div class="group" role="group" aria-label="切換視角">
+          <button type="button" data-view="persp" class="active">透視</button>
+          <button type="button" data-view="front">前視</button>
+          <button type="button" data-view="side">側視</button>
+          <button type="button" data-view="top">俯視</button>
+        </div>
+        <div class="group" role="group" aria-label="顯示選項">
+          <button id="bCut" type="button" aria-pressed="true">剖面</button>
+          <button id="bLabel" type="button" aria-pressed="true">標示</button>
+          <button id="bSpin" type="button" aria-pressed="false">自動環繞</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app");
+  if (!window.THREE || !THREE.OrbitControls) { document.getElementById("err").hidden = false; return; }
+
+  var DEG = Math.PI / 180;
+  var R = 1, L = 3.2, BORE = 1.1, HEAD_Y = 5.2, LIFT = 0.3, CAM_Y = 7.35, VX = 0.6;
+  var V3 = THREE.Vector3, C = THREE.Color;
+
+  var STROKES = [
+    { n: "進氣", en: "Intake", c: "#4aa3ff", d: "進氣門打開，活塞下行，把空氣與燃油混合氣吸進汽缸。" },
+    { n: "壓縮", en: "Compression", c: "#f2c14e", d: "兩個氣門都關閉，活塞上行壓縮混合氣，壓力與溫度上升。" },
+    { n: "動力", en: "Power", c: "#ff6a3d", d: "接近上死點時火星塞點火，燃燒膨脹推動活塞下行，這是唯一對外做功的行程。" },
+    { n: "排氣", en: "Exhaust", c: "#9aa7b4", d: "排氣門打開，活塞上行，把燃燒後的廢氣推出汽缸。" }
+  ];
+
+  /* ---------- renderer / scene ---------- */
+  var canvas = document.getElementById("stage");
+  window.addEventListener("error", function (e) { showFail(e.message || "未知錯誤"); });
+  var renderer = null;
+  try {
+    var probe = document.createElement("canvas");
+    if (!(probe.getContext("webgl") || probe.getContext("experimental-webgl"))) throw new Error("此瀏覽器未開啟 WebGL");
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x0a1017, 1);
+  } catch (err) { renderer = null; showFail(err.message); }
+  var scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0a1017, 22, 48);
+  var camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  camera.position.set(8.5, 6.8, 11.5);
+  var controls = new THREE.OrbitControls(camera, canvas);
+  controls.target.set(0, 3.7, 0);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.minDistance = 5; controls.maxDistance = 32;
+  controls.autoRotateSpeed = 1.6;
+  controls.update();
+
+  scene.add(new THREE.AmbientLight(0x9db2c8, 0.55));
+  var key = new THREE.DirectionalLight(0xffffff, 0.95); key.position.set(6, 10, 9); scene.add(key);
+  var rim = new THREE.DirectionalLight(0x6aa0ff, 0.45); rim.position.set(-8, 4, -7); scene.add(rim);
+  var under = new THREE.DirectionalLight(0xffc890, 0.25); under.position.set(0, -6, 5); scene.add(under);
+  var flame = new THREE.PointLight(0xff8a3a, 0, 7); flame.position.set(0, 4.5, 0); scene.add(flame);
+
+  var grid = new THREE.GridHelper(30, 30, 0x2a4058, 0x182636);
+  grid.position.y = -2.4; scene.add(grid);
+
+  function mat(color, o) {
+    o = o || {};
+    return new THREE.MeshStandardMaterial({
+      color: color, metalness: o.metal != null ? o.metal : 0.45, roughness: o.rough != null ? o.rough : 0.42,
+      transparent: o.opacity != null && o.opacity < 1, opacity: o.opacity != null ? o.opacity : 1,
+      side: o.side || THREE.FrontSide, depthWrite: o.depthWrite !== false, emissive: o.emissive || 0x000000
+    });
+  }
+  function add(parent, geo, m, x, y, z) { var me = new THREE.Mesh(geo, m); me.position.set(x || 0, y || 0, z || 0); parent.add(me); return me; }
+  function alongZ(me) { me.rotation.x = Math.PI / 2; return me; }
+
+  var steel = mat(0x9fb0c0), steelDark = mat(0x5e6f80), alu = mat(0xd3dbe3, { metal: 0.3, rough: 0.35 });
+  var brass = mat(0xd9b26a, { metal: 0.6, rough: 0.35 }), rodMat = mat(0x8b9cad);
+
+  /* ---------- crankshaft ---------- */
+  var crank = new THREE.Group(); scene.add(crank);
+  alongZ(add(crank, new THREE.CylinderGeometry(0.28, 0.28, 4.2, 28), steel, 0, 0, -0.5));
+  [-0.62, 0.62].forEach(function (z) {
+    alongZ(add(crank, new THREE.CylinderGeometry(0.42, 0.42, 0.22, 28), steel, 0, R, z));
+    alongZ(add(crank, new THREE.CylinderGeometry(0.95, 0.95, 0.22, 40), steelDark, 0, -0.5, z));
+    add(crank, new THREE.BoxGeometry(0.7, 1.1, 0.22), steel, 0, 0.4, z);
+  });
+  alongZ(add(crank, new THREE.CylinderGeometry(0.26, 0.26, 1.4, 24), brass, 0, R, 0));
+  var fly = alongZ(add(crank, new THREE.CylinderGeometry(1.8, 1.8, 0.28, 56), steelDark, 0, 0, -1.55));
+  for (var i = 0; i < 8; i++) {
+    var a = i / 8 * Math.PI * 2;
+    alongZ(add(crank, new THREE.CylinderGeometry(0.2, 0.2, 0.3, 16), mat(0x1a242f, { metal: 0.1 }), Math.sin(a) * 1.25, Math.cos(a) * 1.25, -1.55));
+  }
+  add(crank, new THREE.BoxGeometry(0.22, 0.4, 0.32), brass, 0, 1.7, -1.55); // 飛輪上死點記號
+
+  var crankcase = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.95, 1.95, 2.3, 48, 1, true, -Math.PI / 2, Math.PI),
+    mat(0x3b4f63, { opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+  crankcase.rotation.x = Math.PI / 2; scene.add(crankcase);
+
+  /* ---------- piston & rod ---------- */
+  var piston = new THREE.Group(); scene.add(piston);
+  add(piston, new THREE.CylinderGeometry(1.06, 1.06, 0.9, 48), alu, 0, 0.25, 0);
+  [0.5, 0.36].forEach(function (y) { var t = add(piston, new THREE.TorusGeometry(1.06, 0.035, 8, 48), steelDark, 0, y, 0); t.rotation.x = Math.PI / 2; });
+  alongZ(add(piston, new THREE.CylinderGeometry(0.15, 0.15, 1.5, 20), steel, 0, 0, 0));
+
+  var rod = new THREE.Group(); scene.add(rod);
+  add(rod, new THREE.BoxGeometry(0.34, L, 0.2), rodMat, 0, L / 2, 0);
+  alongZ(add(rod, new THREE.CylinderGeometry(0.44, 0.44, 0.6, 28), rodMat, 0, 0, 0));
+  alongZ(add(rod, new THREE.CylinderGeometry(0.24, 0.24, 0.6, 20), rodMat, 0, L, 0));
+
+  /* ---------- cylinder, head, ports ---------- */
+  var shellMat = mat(0x2d4156, { opacity: 0.9, side: THREE.DoubleSide, metal: 0.3 });
+  var shellHalf = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 2.6, 48, 1, true, Math.PI / 2, Math.PI), shellMat);
+  var shellFull = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 2.6, 48, 1, true), shellMat);
+  shellHalf.position.y = shellFull.position.y = 3.9; scene.add(shellHalf, shellFull); shellFull.visible = false;
+  var finGeo = new THREE.TorusGeometry(1.52, 0.05, 6, 48, Math.PI);
+  var finsHalf = new THREE.Group(); scene.add(finsHalf);
+  for (var f = 0; f < 5; f++) { var fm = add(finsHalf, finGeo, steelDark, 0, 2.85 + f * 0.5, 0); fm.rotation.x = Math.PI / 2; fm.rotation.z = Math.PI; }
+  var liner = new THREE.Mesh(new THREE.CylinderGeometry(BORE, BORE, 2.6, 48, 1, true),
+    mat(0xbfe0ff, { opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, metal: 0.1, rough: 0.1 }));
+  liner.position.y = 3.9; scene.add(liner);
+  var headMat = mat(0x3b516a, { opacity: 0.38, depthWrite: false, side: THREE.DoubleSide });
+  var head = add(scene, new THREE.CylinderGeometry(1.6, 1.6, 0.5, 48), headMat, 0, 5.45, 0);
+
+  function port(sign, color) {
+    var cv = new THREE.QuadraticBezierCurve3(new V3(sign * VX, 5.5, 0), new V3(sign * 1.2, 6.0, 0), new V3(sign * 3.6, 6.0, 0));
+    var m = new THREE.Mesh(new THREE.TubeGeometry(cv, 32, 0.3, 16, false), mat(color, { opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
+    scene.add(m);
+  }
+  port(-1, 0x4aa3ff); port(1, 0xff6a3d);
+
+  /* ---------- valves, springs, cams ---------- */
+  class Helix extends THREE.Curve {
+    constructor(h, r, turns) { super(); this.h = h; this.r = r; this.turns = turns; }
+    getPoint(t, target) {
+      target = target || new V3(); var a = t * this.turns * Math.PI * 2;
+      return target.set(Math.cos(a) * this.r, t * this.h, Math.sin(a) * this.r);
+    }
+  }
+  var SPRING_H = 1.15;
+  function camGeo() {
+    var s = new THREE.Shape(), N = 90;
+    for (var i = 0; i <= N; i++) {
+      var a = i / N * Math.PI * 2, d = a + Math.PI / 2; d = Math.atan2(Math.sin(d), Math.cos(d));
+      var r = 0.3 + LIFT * Math.exp(-Math.pow(d / 0.5, 2));
+      if (i) s.lineTo(r * Math.cos(a), r * Math.sin(a)); else s.moveTo(r * Math.cos(a), r * Math.sin(a));
+    }
+    var g = new THREE.ExtrudeGeometry(s, { depth: 0.45, bevelEnabled: false }); g.translate(0, 0, -0.225); return g;
+  }
+  var sharedCam = camGeo(), springGeo = new THREE.TubeGeometry(new Helix(SPRING_H, 0.2, 7), 120, 0.022, 6, false);
+  function makeValve(x, color) {
+    var g = new THREE.Group(); g.position.set(x, HEAD_Y, 0); scene.add(g);
+    add(g, new THREE.CylinderGeometry(0.07, 0.07, 1.9, 12), steel, 0, 0.95, 0);
+    add(g, new THREE.CylinderGeometry(0.42, 0.34, 0.12, 32), mat(color, { metal: 0.55 }), 0, -0.06, 0);
+    add(g, new THREE.CylinderGeometry(0.2, 0.2, 0.1, 20), brass, 0, 1.85, 0);
+    var sp = new THREE.Mesh(springGeo, mat(0xc9d4de, { metal: 0.7, rough: 0.3 })); sp.position.set(x, 5.7, 0); scene.add(sp);
+    var shaft = alongZ(add(scene, new THREE.CylinderGeometry(0.09, 0.09, 1.7, 16), steelDark, x, CAM_Y, 0));
+    var cam = new THREE.Mesh(sharedCam, mat(color, { metal: 0.5 })); cam.position.set(x, CAM_Y, 0); scene.add(cam);
+    return { g: g, sp: sp, cam: cam };
+  }
+  var vI = makeValve(-VX, 0x6fb4ff), vE = makeValve(VX, 0xff8a63);
+
+  /* ---------- spark plug, spark, gas ---------- */
+  var plug = new THREE.Group(); plug.position.set(0, 5.2, 0); scene.add(plug);
+  add(plug, new THREE.CylinderGeometry(0.1, 0.1, 1.3, 16), mat(0xf1f4f7, { metal: 0.1, rough: 0.5 }), 0, 0.8, 0);
+  add(plug, new THREE.CylinderGeometry(0.17, 0.17, 0.22, 6), brass, 0, 0.55, 0);
+  add(plug, new THREE.CylinderGeometry(0.04, 0.04, 0.2, 8), steelDark, 0, -0.05, 0);
+  var spark = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff2c0 }));
+  spark.position.set(0, 5.1, 0); spark.visible = false; scene.add(spark);
+
+  var gasMat = new THREE.MeshBasicMaterial({ color: 0x3b8fe8, transparent: true, opacity: 0.2, depthWrite: false });
+  var gas = new THREE.Mesh(new THREE.CylinderGeometry(BORE - 0.03, BORE - 0.03, 1, 40), gasMat); scene.add(gas);
+  var cBlue = new C(0x3b8fe8), cAmb = new C(0xf2b84a), cHot = new C(0xffe2a0), cRed = new C(0xe2472a), cDark = new C(0x6b3a30), cGrey = new C(0x7f8a96);
+  function gasState(phi) {
+    var t;
+    if (phi < 180) { gasMat.color.copy(cBlue); gasMat.opacity = 0.16 + 0.10 * (phi / 180); }
+    else if (phi < 360) { t = (phi - 180) / 180; gasMat.color.copy(cBlue).lerp(cAmb, t); gasMat.opacity = 0.26 + 0.22 * t; }
+    else if (phi < 540) {
+      t = (phi - 360) / 180;
+      if (t < 0.25) gasMat.color.copy(cHot).lerp(cRed, t / 0.25); else gasMat.color.copy(cRed).lerp(cDark, (t - 0.25) / 0.75);
+      gasMat.opacity = 0.62 - 0.36 * t;
+    } else { t = (phi - 540) / 180; gasMat.color.copy(cDark).lerp(cGrey, Math.min(1, t * 2)); gasMat.opacity = 0.34 * (1 - t) + 0.08; }
+  }
+
+  /* ---------- labels ---------- */
+  var pose = { pinY: L + R, bx: 0, by: R };
+  var LABELS = [
+    { t: "進氣門", p: function () { return new V3(-VX, 6.25, 0); } },
+    { t: "排氣門", p: function () { return new V3(VX, 6.25, 0); } },
+    { t: "凸輪軸", p: function () { return new V3(-VX, 8.0, 0); } },
+    { t: "火星塞", p: function () { return new V3(0, 6.7, 0); } },
+    { t: "汽缸", p: function () { return new V3(1.55, 4.4, 0); } },
+    { t: "活塞", p: function () { return new V3(1.1, pose.pinY + 0.1, 0); } },
+    { t: "連桿", p: function () { return new V3((pose.bx) / 2 + 0.3, (pose.by + pose.pinY) / 2, 0.15); } },
+    { t: "曲軸", p: function () { return new V3(0, -0.2, 1.7); } },
+    { t: "飛輪", p: function () { return new V3(0, -2.0, -1.55); } }
+  ];
+  LABELS.forEach(function (l) { var e = document.createElement("div"); e.className = "tag"; e.innerHTML = "<span>" + l.t + "</span>"; app.appendChild(e); l.el = e; });
+  var showLabels = true, tmp = new V3();
+
+  /* ---------- HUD ---------- */
+  var chipsEl = document.getElementById("chips"), chipEls = [];
+  STROKES.forEach(function (s, i) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.style.setProperty("--c", s.c);
+    b.innerHTML = s.n + "<small>" + s.en + "</small>"; b.title = "跳到" + s.n + "行程起點";
+    b.addEventListener("click", function () { phi = i * 180; });
+    chipsEl.appendChild(b); chipEls.push(b);
+  });
+  var descEl = document.getElementById("desc"), rCrank = document.getElementById("rCrank"), rCycle = document.getElementById("rCycle"), rPiston = document.getElementById("rPiston");
+  var cursor = document.getElementById("cursor"), lastStroke = -1;
+
+  function dwrap(x) { var d = ((x % 720) + 720) % 720; return d > 360 ? d - 720 : d; }
+  function liftAt(p, peak) { var psi = dwrap(p - peak) / 2 * DEG; return LIFT * Math.exp(-Math.pow(psi / 0.5, 2)); }
+
+  (function drawLift() {
+    var svg = document.getElementById("lift"), ptsI = [], ptsE = [];
+    for (var p = 0; p <= 720; p += 4) {
+      ptsI.push(p + "," + (50 - liftAt(p, 90) / LIFT * 30).toFixed(1));
+      ptsE.push(p + "," + (50 - liftAt(p, 630) / LIFT * 30).toFixed(1));
+    }
+    svg.innerHTML = '<polyline points="' + ptsI.join(" ") + '" fill="none" stroke="#4aa3ff" stroke-width="2.2" vector-effect="non-scaling-stroke"/>' +
+      '<polyline points="' + ptsE.join(" ") + '" fill="none" stroke="#ff6a3d" stroke-width="2.2" vector-effect="non-scaling-stroke"/>' +
+      '<line x1="352" x2="352" y1="0" y2="54" stroke="#f2c14e" stroke-width="2" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>';
+  })();
+
+  /* ---------- pose update ---------- */
+  var phi = 0;
+  function update(p) {
+    var th = (p % 360) * DEG, s = Math.sin(th), c = Math.cos(th);
+    crank.rotation.z = -th;
+    var pinY = R * c + Math.sqrt(L * L - R * R * s * s);
+    var bx = R * s, by = R * c;
+    pose.pinY = pinY; pose.bx = bx; pose.by = by;
+    piston.position.y = pinY;
+    rod.position.set(bx, by, 0);
+    rod.rotation.z = Math.atan2(bx, pinY - by);
+
+    var di = dwrap(p - 90) / 2 * DEG, de = dwrap(p - 630) / 2 * DEG;
+    vI.cam.rotation.z = -di; vE.cam.rotation.z = -de;
+    var li = LIFT * Math.exp(-Math.pow(di / 0.5, 2)), le = LIFT * Math.exp(-Math.pow(de / 0.5, 2));
+    vI.g.position.y = HEAD_Y - li; vE.g.position.y = HEAD_Y - le;
+    vI.sp.scale.y = (SPRING_H - li) / SPRING_H; vE.sp.scale.y = (SPRING_H - le) / SPRING_H;
+
+    var top = pinY + 0.7, h = HEAD_Y - top;
+    gas.scale.y = h; gas.position.y = top + h / 2; gasState(p);
+
+    var sparkOn = p >= 352 && p < 372;
+    spark.visible = sparkOn;
+    var burn = p >= 360 && p < 480 ? Math.pow(1 - (p - 360) / 120, 2) : 0;
+    flame.intensity = (sparkOn ? 1.2 : 0) + burn * 7; flame.position.y = top + h * 0.6;
+
+    var st = Math.floor(p / 180) % 4;
+    if (st !== lastStroke) {
+      lastStroke = st;
+      chipEls.forEach(function (e, i) { e.classList.toggle("on", i === st); });
+      descEl.innerHTML = "<b style=\"color:" + STROKES[st].c + "\">" + STROKES[st].n + "行程</b>" + STROKES[st].d;
+    }
+    var deg = p % 360;
+    rCrank.textContent = Math.round(deg) + "°";
+    rCycle.textContent = Math.round(p) + "° / 720°";
+    var travel = Math.round((R + L - pinY) / (2 * R) * 100);
+    rPiston.textContent = (deg < 180 ? "下行 " : "上行 ") + travel + "%";
+    cursor.style.left = "calc(" + (p / 720 * 100).toFixed(2) + "% - 1px)";
+  }
+
+  function projectLabels(w, h) {
+    for (var i = 0; i < LABELS.length; i++) {
+      var l = LABELS[i];
+      if (!showLabels) { l.el.style.display = "none"; continue; }
+      tmp.copy(l.p()).project(camera);
+      if (tmp.z > 1) { l.el.style.display = "none"; continue; }
+      l.el.style.display = "";
+      l.el.style.transform = "translate(" + ((tmp.x * 0.5 + 0.5) * w + 8).toFixed(1) + "px," + ((-tmp.y * 0.5 + 0.5) * h - 7).toFixed(1) + "px)";
+    }
+  }
+
+  /* ---------- controls ---------- */
+  var RPMS = [10, 20, 30, 60, 120, 240, 480, 960], ri = 3, playing = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var bPlay = document.getElementById("bPlay"), rpmEl = document.getElementById("rpm");
+  function syncUI() {
+    bPlay.textContent = playing ? "暫停" : "開始";
+    rpmEl.textContent = RPMS[ri] + " RPM";
+    document.getElementById("bSlow").disabled = ri === 0;
+    document.getElementById("bFast").disabled = ri === RPMS.length - 1;
+  }
+  bPlay.addEventListener("click", function () { playing = !playing; syncUI(); });
+  document.getElementById("bSlow").addEventListener("click", function () { ri = Math.max(0, ri - 1); syncUI(); });
+  document.getElementById("bFast").addEventListener("click", function () { ri = Math.min(RPMS.length - 1, ri + 1); syncUI(); });
+
+  var VIEWS = {
+    persp: new V3(8.5, 6.8, 11.5), front: new V3(0, 3.7, 17), side: new V3(17, 3.7, 0.001), top: new V3(0.001, 20, 0.9)
+  };
+  var viewBtns = Array.prototype.slice.call(document.querySelectorAll("[data-view]")), tw = null;
+  function setActive(name) { viewBtns.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-view") === name); }); }
+  function goView(name) {
+    tw = { t: 0, fp: camera.position.clone(), ft: controls.target.clone(), tp: VIEWS[name].clone(), tt: new V3(0, 3.7, 0) };
+    setActive(name);
+  }
+  viewBtns.forEach(function (b) { b.addEventListener("click", function () { goView(b.getAttribute("data-view")); }); });
+  controls.addEventListener("start", function () { tw = null; setActive(null); });
+
+  function toggle(id, fn) {
+    var b = document.getElementById(id);
+    b.addEventListener("click", function () { var on = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", on); fn(on); });
+  }
+  toggle("bCut", function (on) { shellHalf.visible = on; finsHalf.visible = on; shellFull.visible = !on; headMat.opacity = on ? 0.38 : 0.95; headMat.transparent = on; headMat.depthWrite = !on; headMat.needsUpdate = true; });
+  toggle("bLabel", function (on) { showLabels = on; });
+  toggle("bSpin", function (on) { controls.autoRotate = on; });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.target && e.target.tagName === "BUTTON" && e.code === "Space") return;
+    if (e.code === "Space") { e.preventDefault(); bPlay.click(); }
+    else if (e.key === "+" || e.key === "=") document.getElementById("bFast").click();
+    else if (e.key === "-") document.getElementById("bSlow").click();
+    else if (e.key >= "1" && e.key <= "4") goView(["persp", "front", "side", "top"][+e.key - 1]);
+  });
+
+  /* ---------- loop ---------- */
+  var W = 1, H = 1;
+  function resize() {
+    W = Math.max(1, app.clientWidth); H = Math.max(1, app.clientHeight);
+    if (renderer) renderer.setSize(W, H, false);
+    camera.aspect = W / H; camera.updateProjectionMatrix();
+  }
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(app); else window.addEventListener("resize", resize);
+  resize();
+
+  /* ---------- 無 WebGL 時的 2D 側視備援 ---------- */
+  var c2 = null, c2cv = null;
+  function showFail(msg) {
+    var e = document.getElementById("err");
+    e.textContent = "3D 畫面無法啟動（" + msg + "）。" + (renderer ? "" : "已改用 2D 側視圖，請用支援 WebGL 的瀏覽器開啟以取得完整 3D。");
+    e.hidden = false;
+  }
+  function draw2D() {
+    if (!c2) {
+      c2cv = document.createElement("canvas"); c2cv.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+      canvas.parentNode.replaceChild(c2cv, canvas); c2 = c2cv.getContext("2d");
+    }
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (c2cv.width !== Math.round(W * dpr) || c2cv.height !== Math.round(H * dpr)) { c2cv.width = Math.round(W * dpr); c2cv.height = Math.round(H * dpr); }
+    var g = c2, top = 170, bot = H - 230, s = Math.max(14, Math.min(W / 8.5, (bot - top) / 11)), midY = (top + bot) / 2;
+    function X(x) { return W / 2 + x * s; }
+    function Y(y) { return midY - (y - 3.0) * s; }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = "#0a1017"; g.fillRect(0, 0, W, H);
+    g.lineCap = "round";
+    // 氣體
+    var t = pose.pinY + 0.7;
+    g.globalAlpha = Math.min(1, gasMat.opacity * 1.6); g.fillStyle = "#" + gasMat.color.getHexString();
+    g.fillRect(X(-BORE), Y(HEAD_Y), 2 * BORE * s, (HEAD_Y - t) * s); g.globalAlpha = 1;
+    // 缸壁與缸頭
+    g.strokeStyle = "#5e7a96"; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(X(-BORE), Y(2.6)); g.lineTo(X(-BORE), Y(HEAD_Y)); g.moveTo(X(BORE), Y(2.6)); g.lineTo(X(BORE), Y(HEAD_Y)); g.stroke();
+    g.fillStyle = "#2d4156"; g.fillRect(X(-1.6), Y(5.7), 3.2 * s, 0.5 * s);
+    // 氣門
+    [[-VX, vI, "#6fb4ff"], [VX, vE, "#ff8a63"]].forEach(function (v) {
+      var y = v[1].g.position.y;
+      g.strokeStyle = "#9fb0c0"; g.lineWidth = 3; g.beginPath(); g.moveTo(X(v[0]), Y(y)); g.lineTo(X(v[0]), Y(y + 1.9)); g.stroke();
+      g.fillStyle = v[2]; g.fillRect(X(v[0] - 0.42), Y(y), 0.84 * s, 0.12 * s);
+    });
+    if (spark.visible) { g.fillStyle = "#fff2c0"; g.beginPath(); g.arc(X(0), Y(5.1), 0.2 * s, 0, 7); g.fill(); }
+    // 活塞、連桿、曲軸
+    g.fillStyle = "#d3dbe3"; g.fillRect(X(-1.06), Y(pose.pinY + 0.7), 2.12 * s, 0.9 * s);
+    g.strokeStyle = "#8b9cad"; g.lineWidth = 0.34 * s; g.beginPath(); g.moveTo(X(pose.bx), Y(pose.by)); g.lineTo(X(0), Y(pose.pinY)); g.stroke();
+    g.strokeStyle = "#5e6f80"; g.lineWidth = 0.7 * s; g.beginPath(); g.moveTo(X(pose.bx), Y(pose.by)); g.lineTo(X(-pose.bx * 0.5), Y(-pose.by * 0.5)); g.stroke();
+    g.fillStyle = "#5e6f80"; g.beginPath(); g.arc(X(-pose.bx * 0.5), Y(-pose.by * 0.5), 0.95 * s, 0, 7); g.fill();
+    g.fillStyle = "#9fb0c0"; g.beginPath(); g.arc(X(0), Y(0), 0.35 * s, 0, 7); g.fill();
+    g.fillStyle = "#d9b26a"; g.beginPath(); g.arc(X(pose.bx), Y(pose.by), 0.28 * s, 0, 7); g.fill();
+  }
+
+  var last = performance.now();
+  function frame(now) {
+    var dt = Math.min((now - last) / 1000, 0.05); last = now;
+    if (playing) phi = (phi + RPMS[ri] * 6 * dt) % 720;
+    if (tw) {
+      tw.t = Math.min(1, tw.t + dt / 0.9);
+      var e = tw.t < 0.5 ? 4 * tw.t * tw.t * tw.t : 1 - Math.pow(-2 * tw.t + 2, 3) / 2;
+      camera.position.lerpVectors(tw.fp, tw.tp, e); controls.target.lerpVectors(tw.ft, tw.tt, e);
+      if (tw.t >= 1) tw = null;
+    }
+    update(phi);
+    controls.update();
+    if (renderer) { renderer.render(scene, camera); projectLabels(W, H); }
+    else { LABELS.forEach(function (l) { l.el.style.display = "none"; }); draw2D(); }
+    requestAnimationFrame(frame);
+  }
+  syncUI();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
